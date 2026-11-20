@@ -1,0 +1,9 @@
+{
+  "id": "car-mode",
+  "name": "Car Mode",
+  "description": "Big-button dashboard for checking on and talking to your agents from a car browser, made for the Tesla in-car browser.",
+  "media": [],
+  "requirements": {
+    "paseo": ">=0.16.2"
+  }
+}
