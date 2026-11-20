@@ -5,6 +5,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Pressable, ScrollView, Text, View } from "react-native";
 import { agentTitle, backgroundCount, buildCards, type Card, useAgentDirectory } from "./agents";
 import { AgentView } from "./agent-view";
+import { RoleQuestionList, useRoleQuestions } from "./role-questions";
 import {
   NewAgentComposer,
   type ProjectChoice,
@@ -104,6 +105,12 @@ export function CarModeScreen(props: PluginScreenProps) {
   // aren't turned off. Paseo also keeps old or temporary projects that never had agents.
   const shownNames = new Set(allProjects.map(([name]) => name).filter((name) => !hidden.has(name)));
   const pickerProjects = projectList.projects?.filter((p) => shownNames.has(p.name)) ?? null;
+  const questionProjects = useMemo(
+    () => pickerProjects?.map((p) => ({ root: p.path, name: p.name })) ?? null,
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [pickerProjects?.map((p) => p.path).join("\n")],
+  );
+  const roleQuestions = useRoleQuestions(questionProjects);
   const projects = allProjects.filter(([name]) => !hidden.has(name));
   const visibleCards = allCards.filter((card) => !hidden.has(card.entry.projectName));
 
@@ -180,7 +187,8 @@ export function CarModeScreen(props: PluginScreenProps) {
   const finishedIds = visibleCards
     .filter((card) => card.ownStatus === "finished")
     .map((card) => card.entry.agent.id);
-  const needsYou = visibleCards.filter((card) => card.status === "needs-you").length;
+  const needsYou =
+    visibleCards.filter((card) => card.status === "needs-you").length + roleQuestions.questions.length;
   const working = visibleCards.filter((card) => card.status === "working").length;
 
   return (
@@ -264,7 +272,7 @@ export function CarModeScreen(props: PluginScreenProps) {
               style={{ color: c.foreground, fontSize: Math.round(sizes.heading * 0.8), fontWeight: "800" }}
             >
               {needsYou > 0
-                ? `${needsYou} ${needsYou === 1 ? "agent needs" : "agents need"} you`
+                ? `${needsYou} waiting on you`
                 : working > 0
                   ? `${working} ${working === 1 ? "agent" : "agents"} working`
                   : "All quiet"}
@@ -273,6 +281,14 @@ export function CarModeScreen(props: PluginScreenProps) {
               {props.host.label}
             </Text>
           </View>
+
+          <RoleQuestionList
+            questions={roleQuestions.questions}
+            theme={theme}
+            sizes={sizes}
+            onChanged={roleQuestions.refresh}
+            onOpenAgent={openAgent}
+          />
 
           <ScrollView horizontal showsHorizontalScrollIndicator={false}>
             <View style={{ flexDirection: "row", gap: dense.gap }}>
