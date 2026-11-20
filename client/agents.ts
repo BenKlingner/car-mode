@@ -44,7 +44,11 @@ const PARENT_LABEL = "paseo.parent-agent-id";
 /** How long an agent that stopped on its own counts as just finished. */
 const RECENT_FINISH_MS = 30 * 60 * 1000;
 
-export function carStatus(agent: PaseoAgent, now: number = Date.now()): CarStatus {
+/**
+ * `readAt` is when you last looked at this agent in car mode. A finished agent you've looked at
+ * since it last changed no longer counts as finished.
+ */
+export function carStatus(agent: PaseoAgent, now: number = Date.now(), readAt?: string): CarStatus {
   if ((agent.pendingPermissions?.length ?? 0) > 0) return "needs-you";
   if (agent.status === "error") return "error";
   if (agent.status === "running" || agent.status === "initializing") return "working";
@@ -52,8 +56,9 @@ export function carStatus(agent: PaseoAgent, now: number = Date.now()): CarStatu
   // Paseo's sidebar counts background shells and tasks as running, so car mode does too.
   if (backgroundCount(agent) > 0) return "working";
   if (agent.requiresAttention && agent.attentionReason === "error") return "error";
-  if (agent.requiresAttention && agent.attentionReason === "finished") return "finished";
-  if (justFinished(agent, now)) return "finished";
+  const unread = !readAt || Date.parse(readAt) < Date.parse(agent.updatedAt);
+  if (unread && agent.requiresAttention && agent.attentionReason === "finished") return "finished";
+  if (unread && justFinished(agent, now)) return "finished";
   return "idle";
 }
 
@@ -87,7 +92,12 @@ function rank(status: CarStatus): number {
  * Groups helpers under the agent that spawned them. A helper whose parent is missing stands on
  * its own. With `flat`, every agent gets its own card. Ordered by `rank`, then latest activity.
  */
-export function buildCards(agents: CarAgent[], flat: boolean, now: number = Date.now()): Card[] {
+export function buildCards(
+  agents: CarAgent[],
+  flat: boolean,
+  now: number = Date.now(),
+  readAt: Record<string, string> = {},
+): Card[] {
   const byId = new Map(agents.map((a) => [a.agent.id, a]));
   const helpersOf = new Map<string, CarAgent[]>();
   const tops: CarAgent[] = [];
@@ -111,8 +121,8 @@ export function buildCards(agents: CarAgent[], flat: boolean, now: number = Date
 
   const cards = tops.map((entry): Card => {
     const helpers = collect(entry.agent.id);
-    const own = carStatus(entry.agent, now);
-    const helperStatuses = helpers.map((h) => carStatus(h.agent, now));
+    const own = carStatus(entry.agent, now, readAt[entry.agent.id]);
+    const helperStatuses = helpers.map((h) => carStatus(h.agent, now, readAt[h.agent.id]));
     let status = own;
     if (own !== "needs-you" && helperStatuses.includes("needs-you")) status = "needs-you";
     // A lead that stopped while its helpers work is waiting on them, not on you.

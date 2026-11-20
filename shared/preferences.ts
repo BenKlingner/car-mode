@@ -10,5 +10,7 @@ export const carPreferences = defineSettings({
     hiddenProjects: z.array(z.string()).default([]),
     /** Give helper agents their own cards instead of folding them into their lead's card. */
     showHelpers: z.boolean().default(false),
+    /** When you last looked at each agent, so finished agents you've read drop back down. */
+    readAt: z.record(z.string(), z.string()).default({}),
   }),
 });

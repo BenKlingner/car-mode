@@ -1,4 +1,5 @@
-import { type PluginScreenProps, useSettings } from "@getpaseo/plugin/client";
+import { type PluginScreenProps, useRpc, useSettings } from "@getpaseo/plugin/client";
+import { clearAttention } from "../shared/attention";
 import { carPreferences } from "../shared/preferences";
 import { useEffect, useMemo, useState } from "react";
 import { Pressable, ScrollView, Text, View } from "react-native";
@@ -48,10 +49,41 @@ export function CarModeScreen(props: PluginScreenProps) {
     [prefs],
   );
   const showHelpers = prefs.status === "ready" && prefs.values.showHelpers;
+  const readAt = prefs.status === "ready" ? prefs.values.readAt : EMPTY_READ;
+  const clearPaseoAttention = useRpc(clearAttention);
+
+  /**
+   * Remember that you've seen these agents, so finished ones drop back into place, and clear
+   * Paseo's own attention flag the way opening them in Paseo would.
+   */
+  function markRead(agentIds: string[]) {
+    if (agentIds.length === 0) return;
+    void clearPaseoAttention({ agentIds }).catch(() => {});
+    if (prefs.status !== "ready") return;
+    const stamp = new Date().toISOString();
+    const cutoff = Date.now() - READ_KEEP_MS;
+    const next: Record<string, string> = {};
+    for (const [id, at] of Object.entries(prefs.values.readAt)) {
+      if (Date.parse(at) > cutoff) next[id] = at;
+    }
+    for (const id of agentIds) next[id] = stamp;
+    void prefs.save({ ...prefs.values, readAt: next }, prefs.revision);
+  }
+
+  function openAgent(agentId: string) {
+    markRead([agentId]);
+    setSelectedId(agentId);
+  }
+
+  function closeAgent() {
+    // Mark again on the way out, in case the agent posted while you were reading.
+    if (selectedId) markRead([selectedId]);
+    setSelectedId(null);
+  }
 
   const allCards = useMemo(
-    () => buildCards(directory.agents, showHelpers, now),
-    [directory.agents, showHelpers, now],
+    () => buildCards(directory.agents, showHelpers, now, readAt),
+    [directory.agents, showHelpers, now, readAt],
   );
   const allProjects = useMemo(() => {
     const counts = new Map<string, number>();
@@ -123,11 +155,11 @@ export function CarModeScreen(props: PluginScreenProps) {
       <AgentView
         entry={selected}
         helpers={selectedCard?.helpers ?? []}
-        onOpenAgent={setSelectedId}
+        onOpenAgent={openAgent}
         theme={theme}
         sizes={sizes}
         navigation={props.navigation}
-        onBack={() => setSelectedId(null)}
+        onBack={closeAgent}
       />
     );
   }
@@ -145,6 +177,9 @@ export function CarModeScreen(props: PluginScreenProps) {
     void prefs.save({ ...prefs.values, showHelpers: value }, prefs.revision);
   }
 
+  const finishedIds = visibleCards
+    .filter((card) => card.ownStatus === "finished")
+    .map((card) => card.entry.agent.id);
   const needsYou = visibleCards.filter((card) => card.status === "needs-you").length;
   const working = visibleCards.filter((card) => card.status === "working").length;
 
@@ -189,6 +224,14 @@ export function CarModeScreen(props: PluginScreenProps) {
           theme={theme}
           sizes={barButtonSizes(sizes)}
         />
+        {finishedIds.length > 0 && !creating && !editingProjects ? (
+          <BigButton
+            label={`✓  Mark all read (${finishedIds.length})`}
+            onPress={() => markRead(finishedIds)}
+            theme={theme}
+            sizes={barButtonSizes(sizes)}
+          />
+        ) : null}
       </View>
 
       {creating === "pick" ? (
@@ -271,7 +314,8 @@ export function CarModeScreen(props: PluginScreenProps) {
                   wide={!props.layout.compact}
                   theme={theme}
                   sizes={dense}
-                  onPress={() => setSelectedId(card.entry.agent.id)}
+                  onPress={() => openAgent(card.entry.agent.id)}
+                  onMarkRead={() => markRead([card.entry.agent.id])}
                 />
               ))}
             </View>
@@ -467,6 +511,7 @@ function AgentCard({
   theme,
   sizes,
   onPress,
+  onMarkRead,
 }: {
   card: Card;
   now: number;
@@ -474,6 +519,7 @@ function AgentCard({
   theme: PluginScreenProps["theme"];
   sizes: ReturnType<typeof sizesFor>;
   onPress: () => void;
+  onMarkRead: () => void;
 }) {
   const { agent, projectName } = card.entry;
   const { status, helpers } = card;
@@ -526,18 +572,34 @@ function AgentCard({
           {background} background {background === 1 ? "task" : "tasks"} running
         </Text>
       ) : null}
-      <StatusRow
-        status={card.ownStatus}
-        helpersWorking={card.helpersWorking}
-        helpersNeedYou={card.helpersNeedYou}
-        theme={theme}
-        sizes={sizes}
-      />
+      <View style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: sizes.gap }}>
+        <View style={{ flex: 1, minWidth: 160 }}>
+          <StatusRow
+            status={card.ownStatus}
+            helpersWorking={card.helpersWorking}
+            helpersNeedYou={card.helpersNeedYou}
+            theme={theme}
+            sizes={sizes}
+          />
+        </View>
+        {card.ownStatus === "finished" ? (
+          <BigButton
+            label="✓  Mark read"
+            onPress={onMarkRead}
+            theme={theme}
+            sizes={sizes}
+            accessibilityLabel={`Mark ${title} as read`}
+          />
+        ) : null}
+      </View>
     </Pressable>
   );
 }
 
 const STALE_MS = 3 * 24 * 60 * 60 * 1000;
+/** Read times older than this are dropped; agents that old have long left the finished group. */
+const READ_KEEP_MS = 3 * 24 * 60 * 60 * 1000;
+const EMPTY_READ: Record<string, string> = {};
 
 /** Closed agents untouched for a few days stay behind the "Show older" button. */
 function isStale(card: Card, now: number): boolean {
