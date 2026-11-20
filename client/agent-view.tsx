@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { Pressable, ScrollView, Text, TextInput, View } from "react-native";
 import { agentTitle, backgroundCount, type CarAgent, carStatus } from "./agents";
 import { BackgroundWork } from "./background-work";
+import { PermissionCard } from "./permission-card";
 import { Markdown } from "@getpaseo/plugin/client/ui";
 import { barButtonSizes, BigButton, IconButton, type Sizes, StatusBadge, StatusRow } from "./ui";
 import { useReadAloud } from "./read-aloud";
@@ -67,19 +68,6 @@ export function AgentView({ entry, helpers, onOpenAgent, theme, sizes, navigatio
       setNotice({ text: `Could not send: ${errorText(error)}`, error: true });
     } finally {
       setSending(false);
-    }
-  }
-
-  async function answer(requestId: string, allow: boolean) {
-    setNotice(null);
-    try {
-      await paseo.agents.ref(agent.id).respondToPermission({
-        requestId,
-        response: allow ? { behavior: "allow" } : { behavior: "deny", message: "Denied from car mode" },
-      });
-      setNotice({ text: allow ? "Allowed" : "Denied", error: false });
-    } catch (error) {
-      setNotice({ text: `Could not answer: ${errorText(error)}`, error: true });
     }
   }
 
@@ -185,47 +173,14 @@ export function AgentView({ entry, helpers, onOpenAgent, theme, sizes, navigatio
       </View>
 
       {permissions.map((request) => (
-        <View
+        <PermissionCard
           key={request.id}
-          style={{
-            padding: sizes.pad,
-            gap: sizes.gap,
-            borderRadius: sizes.radius,
-            borderWidth: 3,
-            borderColor: c.statusWarning,
-            backgroundColor: c.surface1,
-          }}
-        >
-          <Text style={{ color: c.statusWarning, fontSize: sizes.small, fontWeight: "800" }}>
-            PERMISSION REQUEST
-          </Text>
-          <Text style={{ color: c.foreground, fontSize: sizes.title, fontWeight: "700" }}>
-            {request.title?.trim() || request.name}
-          </Text>
-          {request.description ? (
-            <Text numberOfLines={6} style={{ color: c.foregroundMuted, fontSize: sizes.body }}>
-              {request.description}
-            </Text>
-          ) : null}
-          <View style={{ flexDirection: "row", gap: sizes.gap }}>
-            <BigButton
-              label="Allow"
-              tone="success"
-              grow
-              onPress={() => void answer(request.id, true)}
-              theme={theme}
-              sizes={sizes}
-            />
-            <BigButton
-              label="Deny"
-              tone="danger"
-              grow
-              onPress={() => void answer(request.id, false)}
-              theme={theme}
-              sizes={sizes}
-            />
-          </View>
-        </View>
+          agentId={agent.id}
+          request={request}
+          theme={theme}
+          sizes={sizes}
+          onResult={(text, error) => setNotice({ text, error })}
+        />
       ))}
 
       <View
