@@ -41,8 +41,11 @@ export interface Card {
 
 const PARENT_LABEL = "paseo.parent-agent-id";
 
-/** How long an agent that stopped on its own counts as just finished. */
-const RECENT_FINISH_MS = 30 * 60 * 1000;
+/**
+ * How long an agent that stopped after your last message stays "finished" until you read it.
+ * Mark read clears it sooner.
+ */
+const RECENT_FINISH_MS = 12 * 60 * 60 * 1000;
 
 /**
  * `readAt` is when you last looked at this agent in car mode. A finished agent you've looked at
@@ -52,7 +55,13 @@ export function carStatus(agent: PaseoAgent, now: number = Date.now(), readAt?: 
   if ((agent.pendingPermissions?.length ?? 0) > 0) return "needs-you";
   if (agent.status === "error") return "error";
   if (agent.status === "running" || agent.status === "initializing") return "working";
-  if (agent.status === "closed") return "closed";
+  if (agent.status === "closed") {
+    // Agents often close minutes after finishing, which also clears Paseo's attention flag.
+    // Closing bumps updatedAt, so a closed agent counts as read once you've looked at it any
+    // time after your last message; otherwise every close would make it unread again.
+    const read = !!readAt && !!agent.lastUserMessageAt && Date.parse(readAt) >= Date.parse(agent.lastUserMessageAt);
+    return !read && justFinished(agent, now) ? "finished" : "closed";
+  }
   // Paseo's sidebar counts background shells and tasks as running, so car mode does too.
   if (backgroundCount(agent) > 0) return "working";
   if (agent.requiresAttention && agent.attentionReason === "error") return "error";
@@ -63,11 +72,11 @@ export function carStatus(agent: PaseoAgent, now: number = Date.now(), readAt?: 
 }
 
 /**
- * Stopped recently after doing something since your last message. Paseo doesn't always flag
- * these for attention, but they are usually waiting on your next step.
+ * Stopped (idle or closed) after doing something since your last message, within the window.
+ * Paseo doesn't always flag these for attention, but they are usually waiting on your next step.
  */
 function justFinished(agent: PaseoAgent, now: number): boolean {
-  if (agent.status !== "idle" || !agent.lastUserMessageAt) return false;
+  if ((agent.status !== "idle" && agent.status !== "closed") || !agent.lastUserMessageAt) return false;
   const updated = Date.parse(agent.updatedAt);
   return updated > Date.parse(agent.lastUserMessageAt) && now - updated < RECENT_FINISH_MS;
 }
